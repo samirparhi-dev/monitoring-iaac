@@ -1,0 +1,19 @@
+adminPassword: "secure-password"
+
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Loki
+        type: loki
+        url: http://loki.logging.svc.cluster.local:3100
+        isDefault: true
+      - name: Prometheus
+        type: prometheus
+        url: http://prometheus-server.monitoring.svc.cluster.local
+        access: proxy
+        basicAuth: false
+
+dashboardProviders:
+  dashboard_provider:
+    url: https://grafana.com/api/dashboards/search 

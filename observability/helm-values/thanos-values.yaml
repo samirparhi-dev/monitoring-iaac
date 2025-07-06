@@ -1,0 +1,5 @@
+sidecar:
+  enabled: true
+  objstoreConfig:
+    type: FILESYSTEM
+    path: /prometheus

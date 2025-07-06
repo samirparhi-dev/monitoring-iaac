@@ -1,0 +1,157 @@
+## This is a guide to implement RBAC
+Implement RBAC for Grafana , so users can only see specific dashboards or data sources based on their group membership — all authenticated via Authentik.
+### Overall View:
+User Browser -> Authentik (OIDC) -> Grafana->Prometheus
+
+User Browser -> Authentik (OIDC) -> Kubernetes Dashboard -> Loki
+
+###  Step-by-Step Implementation Plan
+
+- Deploy Authentik in K8s
+- Configure OIDC in Grafana
+- Set up RBAC roles and groups
+- Restrict dashboard access by user group
+
+### Step 1: Deploy Authentik with Helm
+Create a namespace:
+
+`kubectl create ns authentik`
+
+Add the repo and install:
+
+```
+helm repo add authentik https://charts.goauthentik.io 
+helm install authentik authentik/authentik -n authentik --set replicaCount=1
+```
+Expose via Ingress or LoadBalancer:
+```
+ingress:
+  enabled: true
+  hosts:
+    - host: auth.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+```
+
+Access URL:
+
+https://auth.example.com 
+Default Credentials:
+Username: admin
+Password: admin
+
+### Step 2: Configure OIDC Provider in Grafana
+
+Go to Authentik UI → Applications → + Create Application
+
+#### Fill in:
+
+- Name: `grafana`
+- Slug: `grafana`
+- Provider: + Create Provider → Select - OAuth2/OpenID Connect Provider
+- Name: `grafana-oidc`
+- Client Type: `Confidential`
+- Redirect URIs:
+`http://grafana.monitoring.svc.cluster.local/login/generic_oauth`
+- Scopes: email, profile, openid
+
+Save and copy the Client ID and Client Secret .
+#### Step 3: Configure Grafana with OIDC
+Edit your Grafana Helm values (helm-values/grafana-values.yaml) and add:
+```
+oauth:
+  enabled: true
+  autoSignUp: true
+  clientId: "your-client-id"
+  clientSecret: "your-client-secret"
+  scopes: "openid email profile"
+  authUrl: "https://auth.example.com/application/o/authorize/ "
+  tokenUrl: "https://auth.example.com/application/o/token/ "
+  apiUrl: "https://auth.example.com/application/o/userinfo "
+```
+Reinstall Grafana:
+
+`tofu apply`
+
+#### Step 4: Create Groups & Assign Permissions in Authentik
+
+A. Create User Groups
+In Authentik UI:
+
+Go to Directory → Groups
+Create:
+- Admins
+- Developers
+- Read-Only
+
+B. Assign Users to Groups
+
+- Go to Directory → Users
+- Edit a user and assign them to one or more groups
+
+#### Step 5: Map Groups to Grafana Roles
+Edit Grafana ConfigMap or use the API to map groups to roles:
+
+```
+[auth.generic_oauth]
+enabled = true
+client_id = your-client-id
+client_secret = your-client-secret
+scopes = openid email profile
+role_attribute_path = contains(['admin@example.com'], email) && 'Admin' || 'Viewer'
+```
+Or use RBAC mapping in Grafana.ini :
+
+```
+role_attribute_strict = false
+role_attribute_path = contains(groups[*], 'Admins') && 'Admin' || contains(groups[*], 'Developers') && 'Editor' || 'Viewer'
+```
+#### Step 6: Apply Role-Based Dashboard Access
+
+- Option A: Folder Permissions
+    - In Grafana UI:
+
+        - Go to Manage Dashboards → Folders
+
+        - Create folders like:
+            - Infrastructure Monitoring
+            - Application Logs
+    - Assign folder view/edit permissions per role/group
+
+- Option B: Datasource Permissions
+Restrict access to Prometheus/Loki
+    - datasources per role:
+        - Admins can query all metrics
+        - Developers can only query app logs
+        - Viewers have limited access
+#### Step6: Add Kubernetes Authentication via Authentik
+use Authentik for Kubernetes access :
+
+Use Pinniped or configure kube-apiserver with OIDC flags:
+```
+--oidc-issuer-url=https://auth.example.com/application/o/grafana-oidc/ 
+--oidc-client-id=your-client-id
+--oidc-username-claim=email
+--oidc-groups-claim=groups
+```
+Then define Kubernetes RBAC:
+
+```
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: authentik-admins
+subjects:
+  - kind: Group
+    name: Admins
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+  ```
+
+
+
+

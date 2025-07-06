@@ -1,0 +1,5 @@
+server:
+  persistentVolume:
+    enabled: true
+    storageClass: local-path
+    size: 20Gi
